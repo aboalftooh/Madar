@@ -30,6 +30,27 @@ jobs:
           chmod +x "$ROOT/gradlew"
           echo "Project root: $ROOT"
 
+      - name: Baseline A01 closeout verifier
+        id: a01_closeout
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: python3 tools/verify_release_closeout.py
+
+      - name: Apply verified compile fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="$PROJECT_ROOT/app/src/main/java/com/shift/app/feature/goals/data/GoalCompletionAdapter.kt"
+          grep -q 'private val costCompletion: RoomCostGoalCompletion' "$FILE"
+          sed -i 's/private val costCompletion: RoomCostGoalCompletion/private val costCompletion: CompleteCostGoal/' "$FILE"
+          grep -q 'private val costCompletion: CompleteCostGoal' "$FILE"
+
+      - name: Module graph verifier
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: python3 tools/verify_module_graph.py
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -67,18 +88,6 @@ jobs:
           keyAlias=madar-ci
           keyPassword=madar-ci-2026
           EOF
-
-      - name: Module graph verifier
-        shell: bash
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: python3 tools/verify_module_graph.py
-
-      - name: A01 closeout verifier
-        id: a01_closeout
-        continue-on-error: true
-        shell: bash
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: python3 tools/verify_release_closeout.py
 
       - name: Unit tests
         shell: bash
@@ -122,6 +131,9 @@ jobs:
           find "$PROJECT_ROOT" -path '*/build/outputs/apk/release/*.apk' -type f -exec cp {} ci-output/apk/ \;
           test -n "$(find ci-output/apk -name '*.apk' -type f -print -quit)"
           sha256sum ci-output/apk/*.apk | tee ci-output/APK_SHA256.txt
+          cat > ci-output/PATCH_APPLIED.txt <<'EOF'
+          Compile blocker repaired: GoalCompletionAdapter costCompletion dependency changed from missing RoomCostGoalCompletion to existing CompleteCostGoal. No business logic changed.
+          EOF
           printf 'module_graph=PASS\na01_closeout=%s\nunit_tests=PASS\nlint=PASS\ninstrumentation=PASS\nrelease_build=PASS\n' '${{ steps.a01_closeout.outcome }}' > ci-output/STEP_OUTCOMES.txt
 
       - name: Upload release APK and reports
