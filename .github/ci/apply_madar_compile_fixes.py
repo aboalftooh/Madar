@@ -82,9 +82,14 @@ replace(
 )
 
 replace(
-    "app/src/main/java/com/shift/app/feature/goals/data/GoalCompletionAdapter.kt",
-    "class GoalCompletionAdapter @Inject constructor(",
-    "internal class GoalCompletionAdapter @Inject constructor(",
+    "app/src/main/java/com/shift/app/feature/goals/data/RoomAssetGoalCompletion.kt",
+    "internal class RoomAssetGoalCompletion @Inject constructor(",
+    "class RoomAssetGoalCompletion @Inject constructor(",
+)
+replace(
+    "app/src/main/java/com/shift/app/feature/goals/data/RoomGoalDebtPayment.kt",
+    "internal class RoomGoalDebtPayment @Inject constructor(",
+    "class RoomGoalDebtPayment @Inject constructor(",
 )
 replace(
     "app/src/main/java/com/shift/app/feature/goals/data/GoalCompletionAdapter.kt",
