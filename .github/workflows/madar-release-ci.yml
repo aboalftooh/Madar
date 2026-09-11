@@ -1,0 +1,132 @@
+name: Madar Release CI
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract project
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf work
+          mkdir work
+          unzip -q madar-v16-a01-PARTIAL_NOT_RELEASE_READY.zip -d work
+          ROOT="$(dirname "$(find work -name gradlew -type f -print -quit)")"
+          test -n "$ROOT"
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+          chmod +x "$ROOT/gradlew"
+          echo "Project root: $ROOT"
+
+      - name: Configure CI-only backend values
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$PROJECT_ROOT/local.properties" <<EOF
+          sdk.dir=${ANDROID_HOME}
+          SUPABASE_URL=https://ci-placeholder.supabase.co
+          SUPABASE_KEY=ci-placeholder-public-anon-key
+          SENTRY_DSN=
+          EOF
+
+      - name: Generate ephemeral release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -v \
+            -keystore "$PROJECT_ROOT/madar-ci-release.jks" \
+            -storepass 'madar-ci-2026' \
+            -alias madar-ci \
+            -keypass 'madar-ci-2026' \
+            -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname 'CN=Madar CI, OU=CI, O=Madar, L=Khartoum, ST=Khartoum, C=SD'
+          cat > "$PROJECT_ROOT/keystore.properties" <<EOF
+          storeFile=madar-ci-release.jks
+          storePassword=madar-ci-2026
+          keyAlias=madar-ci
+          keyPassword=madar-ci-2026
+          EOF
+
+      - name: Static project verifiers
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify_module_graph.py
+          python3 tools/verify_release_closeout.py
+
+      - name: Unit tests
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: ./gradlew --no-daemon --stacktrace test
+
+      - name: Lint
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: ./gradlew --no-daemon --stacktrace lint
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Instrumentation tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          working-directory: ${{ env.PROJECT_ROOT }}
+          script: ./gradlew --no-daemon --stacktrace connectedDebugAndroidTest
+
+      - name: Build release APK
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Collect reports and APK
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-output/reports ci-output/apk
+          find "$PROJECT_ROOT" -path '*/build/reports/*' -type f -exec cp --parents {} ci-output/reports/ \; || true
+          find "$PROJECT_ROOT" -path '*/build/outputs/apk/release/*.apk' -type f -exec cp {} ci-output/apk/ \; || true
+          if compgen -G 'ci-output/apk/*.apk' > /dev/null; then
+            sha256sum ci-output/apk/*.apk | tee ci-output/APK_SHA256.txt
+          fi
+
+      - name: Upload release APK and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: madar-release-ci
+          path: ci-output/
+          if-no-files-found: warn
+          retention-days: 14
