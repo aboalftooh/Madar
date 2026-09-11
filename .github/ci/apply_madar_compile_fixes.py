@@ -138,7 +138,6 @@ replace(
     "@OptIn(ExperimentalMaterial3Api::class)\n@Composable\ninternal fun CreateDebtAccountSheet(",
 )
 
-# Asset atomic RPC needs the same legacy ledger serialization as LedgerRemoteSyncDataSource.
 ledger_rel = "app/src/main/java/com/shift/app/data/remote/LedgerRemoteSyncDataSource.kt"
 asset_rel = "app/src/main/java/com/shift/app/data/remote/AssetRemoteSyncDataSource.kt"
 ledger = read(ledger_rel)
@@ -152,5 +151,13 @@ if "private fun BalanceTransaction.toRemote(uid: String): RemoteBalanceTransacti
         raise RuntimeError("AssetRemoteSyncDataSource closing brace not found")
     asset = asset[:insert_at] + "\n\n" + mappings + "\n" + asset[insert_at:]
     write(asset_rel, asset)
+
+module_rel = "app/src/main/java/com/shift/app/feature/goals/di/GoalFeatureModule.kt"
+add_imports(module_rel, ["com.shift.app.feature.goals.domain.repository.GoalInvalidationGateway"])
+replace(
+    module_rel,
+    "    @Binds @Singleton abstract fun bindGoalGateway(impl: GoalGatewayAdapter): GoalGateway\n    @Binds @Singleton abstract fun bindGoalCompletionPort(impl: GoalCompletionAdapter): GoalCompletionPort",
+    "    @Binds @Singleton abstract fun bindGoalGateway(impl: GoalGatewayAdapter): GoalGateway\n    @Binds @Singleton abstract fun bindGoalInvalidationGateway(impl: GoalGatewayAdapter): GoalInvalidationGateway\n    @Binds @Singleton abstract fun bindGoalCompletionPort(impl: GoalCompletionAdapter): GoalCompletionPort",
+)
 
 print("Madar compile repairs applied")
